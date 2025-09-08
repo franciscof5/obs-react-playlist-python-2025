@@ -1,142 +1,134 @@
 import time
 import os
+import re
+from datetime import datetime
 from obsws_python import ReqClient
 
-# Configurações
-REACT_TIME = 10
+# ---------------- CONFIGURAÇÕES ---------------- #
+REACT_TIME = 10  # duração de cada react em segundos
 ARQUIVO_REACTS = "/Users/francisco/Downloads/reacts.txt"
 FONTE_TITULO = "ReactTitle"
 FONTE_TIMER = "ReactTimer"
+DIRETORIO_GRAVACAO = "/Users/francisco/Movies"
 
-# Configuração do cliente OBS
+# Conexão com o OBS
 client = ReqClient(host="localhost", port=4455, password="123123")
 
-def ler_reacts(arquivo):
-    """Lê o arquivo de reacts e retorna uma lista"""
+# ---------------- FUNÇÕES ---------------- #
+
+def sanitizar_nome_arquivo(nome: str) -> str:
+    """Remove caracteres inválidos para nome de arquivo"""
+    nome_limpo = re.sub(r'[<>:"/\\|?*]', '', nome)
+    nome_limpo = nome_limpo.replace(' ', '_')
+    nome_limpo = nome_limpo.replace('.', '_')
+    return nome_limpo[:40]
+
+def ler_reacts(arquivo: str) -> list:
+    """Lê os reacts do arquivo TXT"""
     try:
         with open(arquivo, 'r', encoding='utf-8') as f:
             reacts = [linha.strip() for linha in f if linha.strip()]
+        print(f"✅ {len(reacts)} reacts carregados")
         return reacts
-    except FileNotFoundError:
-        print(f"Erro: Arquivo {arquivo} não encontrado!")
-        return []
     except Exception as e:
-        print(f"Erro ao ler arquivo: {e}")
+        print(f"❌ Erro ao ler reacts: {e}")
         return []
 
-def configurar_titulo(texto):
-    """Configura o texto do título"""
+def configurar_titulo(texto: str):
+    """Atualiza a fonte de título na cena"""
     try:
-        settings = {
-            "text": texto,
-            "font": {
-                "face": "Arial Black",
-                "size": 56,
-                "style": "Bold",
-                "flags": 1
-            },
-            "color": 16777215,  # Branco
-            "align": "center"
-        }
-        client.set_input_settings(FONTE_TITULO, settings, overlay=True)
-        print(f"📝 Título definido: {texto}")
-    except Exception as e:
-        print(f"❌ Erro ao configurar título: {e}")
+        client.set_input_settings(FONTE_TITULO, {"text": texto}, overlay=True)
+        print(f"📝 {texto}")
+    except:
+        pass
 
-def atualizar_timer(segundos_restantes):
-    """Atualiza o timer com o tempo restante"""
+def atualizar_timer(segundos: int):
+    """Atualiza a fonte do timer na cena"""
     try:
-        minutos = segundos_restantes // 60
-        segundos = segundos_restantes % 60
-        texto_timer = f"{minutos:02d}:{segundos:02d}"
-        
-        settings = {
-            "text": texto_timer,
-            "font": {
-                "face": "Consolas",
-                "size": 42,
-                "style": "Bold",
-                "flags": 1
-            },
-            "color": 65280 if segundos_restantes > 10 else 16711680,  # Verde ou Vermelho
-            "align": "center"
-        }
-        client.set_input_settings(FONTE_TIMER, settings, overlay=True)
-    except Exception as e:
-        print(f"❌ Erro ao atualizar timer: {e}")
+        minutos = segundos // 60
+        segs = segundos % 60
+        texto = f"{minutos:02d}:{segs:02d}"
+        client.set_input_settings(FONTE_TIMER, {"text": texto}, overlay=True)
+    except:
+        pass
 
-def gravar_react(titulo, tempo_total):
-    """Grava um react individual"""
+def gravar_react(titulo: str, tempo_total: int, idx: int):
+    """Grava um react e renomeia o arquivo com sufixo do TXT"""
     try:
-        # Configurar título
+        print(f"\n🎬 REACT {idx}: {titulo}")
+
+        # 1. Configurar título
         configurar_titulo(titulo)
-        time.sleep(1)  # Pequena pausa para garantir atualização
-        
-        # Verificar se já está gravando
-        status = client.get_record_status()
-        if status.output_active:
-            client.stop_record()
-            time.sleep(2)
-        
-        # Iniciar gravação
-        print(f"🎥 Iniciando gravação de {tempo_total}s: {titulo}")
+        time.sleep(0.5)
+
+        # 2. Parar gravação anterior se existir
+        try:
+            status = client.get_record_status()
+            if status.output_active:
+                client.stop_record()
+                time.sleep(1)
+        except:
+            pass
+
+        # 3. Iniciar gravação
+        print("⏺️  Iniciando gravação...")
         client.start_record()
-        
-        # Loop do timer
-        for segundos_restantes in range(tempo_total, 0, -1):
-            atualizar_timer(segundos_restantes)
+
+        # 4. Timer regressivo
+        for segundos in range(tempo_total, 0, -1):
+            atualizar_timer(segundos)
             time.sleep(1)
-            
-            # Feedback a cada 10 segundos
-            if segundos_restantes % 10 == 0:
-                print(f"⏰ {segundos_restantes}s restantes: {titulo}")
-        
-        # Finalizar gravação
+            if segundos % 5 == 0 or segundos <= 5:
+                print(f"⏰ {segundos}s")
+
+        # 5. Parar gravação
         client.stop_record()
-        print(f"✅ Gravação finalizada: {titulo}")
-        time.sleep(2)  # Pausa entre gravações
-        
+        print("✅ Gravação finalizada")
+
+        # 6. Renomear arquivo mais recente
+        arquivos = sorted(
+            [f for f in os.listdir(DIRETORIO_GRAVACAO) if f.endswith('.mp4')],
+            key=lambda x: os.path.getmtime(os.path.join(DIRETORIO_GRAVACAO, x)),
+            reverse=True
+        )
+
+        if arquivos:
+            arquivo_recente = arquivos[0]
+            timestamp = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
+            titulo_sanitizado = sanitizar_nome_arquivo(titulo)
+            novo_nome = f"{timestamp} - {titulo_sanitizado}.mp4"
+
+            os.rename(
+                os.path.join(DIRETORIO_GRAVACAO, arquivo_recente),
+                os.path.join(DIRETORIO_GRAVACAO, novo_nome)
+            )
+            print(f"📁 Renomeado: {arquivo_recente} -> {novo_nome}")
+
     except Exception as e:
-        print(f"❌ Erro durante gravação: {e}")
+        print(f"❌ Erro: {e}")
+
+# ---------------- MAIN ---------------- #
 
 def main():
-    """Função principal"""
-    print("🎬 Iniciando produção de reacts...")
-    
-    # Ler reacts do arquivo
+    print("🚀 INICIANDO GRAVAÇÃO (MÉTODO SIMPLES)")
+    print("=" * 60)
+
     reacts = ler_reacts(ARQUIVO_REACTS)
-    
     if not reacts:
-        print("Nenhum react encontrado para gravar!")
         return
-    
-    print(f"📋 Reacts encontrados: {len(reacts)}")
+
     for i, react in enumerate(reacts, 1):
-        print(f"  {i}. {react}")
-    
-    print(f"\n⏰ Tempo por react: {REACT_TIME} segundos")
-    print("=" * 50)
-    
-    # Gravar cada react
-    for i, react in enumerate(reacts, 1):
-        print(f"\n🎬 React {i}/{len(reacts)}")
-        gravar_react(react, REACT_TIME)
-    
-    print("\n" + "=" * 50)
-    print("🎉 Produção de reacts concluída!")
-    print(f"📊 Total de vídeos gravados: {len(reacts)}")
+        gravar_react(react, REACT_TIME, i)
+
+    print("\n🎉 GRAVAÇÃO CONCLUÍDA!")
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n⏹️ Script interrompido pelo usuário")
-        try:
-            client.stop_record()
-        except:
-            pass
+        print("\n⏹️  Interrompido")
     except Exception as e:
-        print(f"❌ Erro fatal: {e}")
+        print(f"💥 Erro: {e}")
     finally:
         try:
             client.disconnect()
