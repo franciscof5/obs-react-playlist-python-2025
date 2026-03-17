@@ -144,7 +144,7 @@ def main():
     if not reacts: 
         return
     
-    driver = abrir_navegador_metade(lado="esquerda")
+    driver = abrir_navegador_metade(lado="direita")
     
     videos_16x9 = []  # lista para armazenar caminhos dos vídeos
     
